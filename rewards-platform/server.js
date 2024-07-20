@@ -1,7 +1,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
-const { DiamanteSdk } = require('diamante-sdk-js');
+var DiamSdk = require("diamante-sdk-js");
+
 
 const app = express();
 const port = 3000;
@@ -11,20 +12,86 @@ app.use(bodyParser.json());
 // Wrapper for Diamante SDK functions
 
 const diamante = {
-    createWallet: async () => {
-      // Implement wallet creation logic here
-      // This is a placeholder implementation
-      return { address: 'sample_address_' + Math.random().toString(36).substring(7) };
+    createWallet: async () => {const fetch = require('node-fetch');
+        const { Keypair, Horizon } = require("diamante-sdk-js");
+        
+        (async function createAccount() {
+          try {
+            const pair = Keypair.random();
+            const response = await fetch(`https://friendbot.diamcircle.io?addr=${encodeURIComponent(pair.publicKey())}`);
+            const responseJSON = await response.json();
+            console.log("SUCCESS! You have a new account :)\n", responseJSON);
+            console.log("New Account Public Key:", pair.publicKey());
+            console.log("New Account Secret Key:", pair.secret());
+          } catch (e) {
+            console.error("ERROR!", e);
+          }
+        })();
+        return  responseJSON;        
     },
     getBalance: async (address) => {
-      // Implement balance checking logic here
-      // This is a placeholder implementation
-      return Math.floor(Math.random() * 1000);
+        const { Keypair, Horizon } = require("diamante-sdk-js");
+
+        (async function checkBalance() {
+          const pair = Keypair.fromSecret("YOUR_SECRET_KEY"); // Replace with your secret key
+          const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
+        
+          try {
+            const account = await server.loadAccount(pair.publicKey());
+            console.log("Balances for account: " + pair.publicKey());
+            account.balances.forEach(function (balance) {
+              console.log("Type:", balance.asset_type, ", Balance:", balance.balance);
+            });
+          } catch (e) {
+            console.error("ERROR!", e);
+          }
+        })();
+        return balance;        
     },
-    transfer: async (address, amount) => {
-      // Implement token transfer logic here
-      // This is a placeholder implementation
-      return { hash: 'sample_tx_hash_' + Math.random().toString(36).substring(7) };
+    transfer: async (address, amount) => {const {
+        Keypair,
+        Horizon,
+        TransactionBuilder,
+        Networks,
+        Operation,
+        Asset,
+        BASE_FEE,
+      } = require("diamante-sdk-js");
+      
+      const transferAssets = async () => {
+        const sender = Keypair.fromSecret("YOUR_SECRET_KEY"); // Replace with your secret key
+        const receiverPublicKey = "RECEIVER_PUBLIC_KEY"; // Replace with receiver's public key
+      
+        const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
+      
+        try {
+          const senderAccount = await server.loadAccount(sender.publicKey());
+      
+          const transaction = new TransactionBuilder(senderAccount, {
+            fee: BASE_FEE,
+            networkPassphrase: "Diamante Testnet",
+          })
+            .addOperation(
+              Operation.payment({
+                destination: receiverPublicKey,
+                asset: Asset.native(),
+                amount: "10", // Amount to transfer
+              })
+            )
+            .setTimeout(30)
+            .build();
+      
+          transaction.sign(sender);
+      
+          const res = await server.submitTransaction(transaction);
+          console.log(`Transaction Successful! Hash: ${res.hash}`);
+        } catch (error) {
+          console.log(`${error}. More details:\n${JSON.stringify(error.response.data.extras, null, 2)}`);
+        }
+      };
+      
+      transferAssets();
+      
     },
     burn: async (address, amount) => {
       // Implement token burning logic here
