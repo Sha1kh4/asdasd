@@ -1,105 +1,92 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
-var DiamSdk = require("diamante-sdk-js");
-
+const fetch = require('node-fetch');
+const {
+  Keypair,
+  Horizon,
+  TransactionBuilder,
+  Networks,
+  Operation,
+  Asset,
+  BASE_FEE,
+} = require("diamante-sdk-js");
 
 const app = express();
 const port = 3000;
 
 // Middleware
 app.use(bodyParser.json());
+
 // Wrapper for Diamante SDK functions
-
 const diamante = {
-    createWallet: async () => {const fetch = require('node-fetch');
-        const { Keypair, Horizon } = require("diamante-sdk-js");
-        
-        (async function createAccount() {
-          try {
-            const pair = Keypair.random();
-            const response = await fetch(`https://friendbot.diamcircle.io?addr=${encodeURIComponent(pair.publicKey())}`);
-            const responseJSON = await response.json();
-            console.log("SUCCESS! You have a new account :)\n", responseJSON);
-            console.log("New Account Public Key:", pair.publicKey());
-            console.log("New Account Secret Key:", pair.secret());
-          } catch (e) {
-            console.error("ERROR!", e);
-          }
-        })();
-        return  responseJSON;        
-    },
-    getBalance: async (address) => {
-        const { Keypair, Horizon } = require("diamante-sdk-js");
-
-        (async function checkBalance() {
-          const pair = Keypair.fromSecret("YOUR_SECRET_KEY"); // Replace with your secret key
-          const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
-        
-          try {
-            const account = await server.loadAccount(pair.publicKey());
-            console.log("Balances for account: " + pair.publicKey());
-            account.balances.forEach(function (balance) {
-              console.log("Type:", balance.asset_type, ", Balance:", balance.balance);
-            });
-          } catch (e) {
-            console.error("ERROR!", e);
-          }
-        })();
-        return balance;        
-    },
-    transfer: async (address, amount) => {const {
-        Keypair,
-        Horizon,
-        TransactionBuilder,
-        Networks,
-        Operation,
-        Asset,
-        BASE_FEE,
-      } = require("diamante-sdk-js");
-      
-      const transferAssets = async () => {
-        const sender = Keypair.fromSecret("YOUR_SECRET_KEY"); // Replace with your secret key
-        const receiverPublicKey = "RECEIVER_PUBLIC_KEY"; // Replace with receiver's public key
-      
-        const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
-      
-        try {
-          const senderAccount = await server.loadAccount(sender.publicKey());
-      
-          const transaction = new TransactionBuilder(senderAccount, {
-            fee: BASE_FEE,
-            networkPassphrase: "Diamante Testnet",
-          })
-            .addOperation(
-              Operation.payment({
-                destination: receiverPublicKey,
-                asset: Asset.native(),
-                amount: "10", // Amount to transfer
-              })
-            )
-            .setTimeout(30)
-            .build();
-      
-          transaction.sign(sender);
-      
-          const res = await server.submitTransaction(transaction);
-          console.log(`Transaction Successful! Hash: ${res.hash}`);
-        } catch (error) {
-          console.log(`${error}. More details:\n${JSON.stringify(error.response.data.extras, null, 2)}`);
-        }
+  createWallet: async () => {
+    try {
+      const pair = Keypair.random();
+      const response = await fetch(`https://friendbot.diamcircle.io?addr=${encodeURIComponent(pair.publicKey())}`);
+      const responseJSON = await response.json();
+      return {
+        address: pair.publicKey(),
+        secret: pair.secret(),
       };
-      
-      transferAssets();
-      
-    },
-    burn: async (address, amount) => {
-      // Implement token burning logic here
-      // This is a placeholder implementation
-      return { hash: 'sample_tx_hash_' + Math.random().toString(36).substring(7) };
+    } catch (e) {
+      console.error("ERROR!", e);
+      throw new Error('Failed to create wallet');
     }
-  };
-// Diamante SDK setup
+  },
+
+  getBalance: async (secret) => {
+    try {
+      const pair = Keypair.fromSecret(secret);
+      const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
+      const account = await server.loadAccount(pair.publicKey());
+      let balance = 0;
+      account.balances.forEach(function (bal) {
+        if (bal.asset_type === 'native') {
+          balance = bal.balance;
+        }
+      });
+      return balance;
+    } catch (e) {
+      console.error("ERROR!", e);
+      throw new Error('Failed to get balance');
+    }
+  },
+
+  transfer: async (senderSecret, receiverAddress, amount) => {
+    const sender = Keypair.fromSecret(senderSecret);
+    const server = new Horizon.Server("https://diamtestnet.diamcircle.io/");
+    
+    try {
+      const senderAccount = await server.loadAccount(sender.publicKey());
+      const transaction = new TransactionBuilder(senderAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: "Diamante Testnet",
+      })
+        .addOperation(
+          Operation.payment({
+            destination: receiverAddress,
+            asset: Asset.native(),
+            amount: amount.toString(),
+          })
+        )
+        .setTimeout(30)
+        .build();
+      transaction.sign(sender);
+      const res = await server.submitTransaction(transaction);
+      return res;
+    } catch (error) {
+      console.error("ERROR!", error);
+      throw new Error('Failed to transfer tokens');
+    }
+  },
+
+  burn: async (address, amount) => {
+    // Implement token burning logic here
+    // This is a placeholder implementation
+    return { hash: 'sample_tx_hash_' + Math.random().toString(36).substring(7) };
+  }
+};
 
 // Database setup
 const db = new sqlite3.Database('./rewards.db', (err) => {
@@ -116,6 +103,7 @@ function initDatabase() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
     wallet_address TEXT UNIQUE,
+    secret_key TEXT UNIQUE,
     loyalty_points INTEGER DEFAULT 0
   )`);
 
@@ -131,19 +119,11 @@ function initDatabase() {
 }
 
 // Routes
-
-// Create a new user
-app.use((err, req, res, next) => {
-    console.error(err.stack); // Log the error stack trace
-    res.status(500).json({ error: 'An internal server error occurred.' });
-  });
-
-  
 app.post('/users', async (req, res) => {
   const { username } = req.body;
   try {
     const wallet = await diamante.createWallet();
-    db.run('INSERT INTO users (username, wallet_address) VALUES (?, ?)', [username, wallet.address], function(err) {
+    db.run('INSERT INTO users (username, wallet_address, secret_key) VALUES (?, ?, ?)', [username, wallet.address, wallet.secret], function(err) {
       if (err) {
         res.status(400).json({ error: err.message });
         return;
@@ -155,10 +135,9 @@ app.post('/users', async (req, res) => {
   }
 });
 
-// Get user balance
 app.get('/users/:id/balance', async (req, res) => {
   const { id } = req.params;
-  db.get('SELECT wallet_address, loyalty_points FROM users WHERE id = ?', [id], async (err, row) => {
+  db.get('SELECT wallet_address, secret_key, loyalty_points FROM users WHERE id = ?', [id], async (err, row) => {
     if (err) {
       res.status(400).json({ error: err.message });
       return;
@@ -168,7 +147,7 @@ app.get('/users/:id/balance', async (req, res) => {
       return;
     }
     try {
-      const balance = await diamante.getBalance(row.wallet_address);
+      const balance = await diamante.getBalance(row.secret_key);
       res.json({ tokens: balance, loyalty_points: row.loyalty_points });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -176,11 +155,10 @@ app.get('/users/:id/balance', async (req, res) => {
   });
 });
 
-// Issue tokens to a user
 app.post('/users/:id/issue-tokens', async (req, res) => {
   const { id } = req.params;
   const { amount } = req.body;
-  db.get('SELECT wallet_address FROM users WHERE id = ?', [id], async (err, row) => {
+  db.get('SELECT wallet_address, secret_key FROM users WHERE id = ?', [id], async (err, row) => {
     if (err) {
       res.status(400).json({ error: err.message });
       return;
@@ -190,7 +168,7 @@ app.post('/users/:id/issue-tokens', async (req, res) => {
       return;
     }
     try {
-      const tx = await diamante.transfer(row.wallet_address, amount);
+      const tx = await diamante.transfer(row.secret_key, row.wallet_address, amount);
       db.run('INSERT INTO transactions (user_id, type, amount, tx_hash) VALUES (?, ?, ?, ?)', [id, 'issue', amount, tx.hash]);
       res.json({ message: 'Tokens issued successfully', tx_hash: tx.hash });
     } catch (error) {
@@ -199,11 +177,10 @@ app.post('/users/:id/issue-tokens', async (req, res) => {
   });
 });
 
-// Redeem tokens
 app.post('/users/:id/redeem-tokens', async (req, res) => {
   const { id } = req.params;
   const { amount } = req.body;
-  db.get('SELECT wallet_address FROM users WHERE id = ?', [id], async (err, row) => {
+  db.get('SELECT wallet_address, secret_key FROM users WHERE id = ?', [id], async (err, row) => {
     if (err) {
       res.status(400).json({ error: err.message });
       return;
@@ -213,7 +190,7 @@ app.post('/users/:id/redeem-tokens', async (req, res) => {
       return;
     }
     try {
-      const balance = await diamante.getBalance(row.wallet_address);
+      const balance = await diamante.getBalance(row.secret_key);
       if (balance < amount) {
         res.status(400).json({ error: 'Insufficient tokens' });
         return;
@@ -227,7 +204,6 @@ app.post('/users/:id/redeem-tokens', async (req, res) => {
   });
 });
 
-// Add loyalty points
 app.post('/users/:id/add-loyalty-points', (req, res) => {
   const { id } = req.params;
   const { points } = req.body;
@@ -241,7 +217,6 @@ app.post('/users/:id/add-loyalty-points', (req, res) => {
   });
 });
 
-// Get transaction history
 app.get('/users/:id/transactions', (req, res) => {
   const { id } = req.params;
   db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY timestamp DESC', [id], (err, rows) => {
@@ -256,4 +231,5 @@ app.get('/users/:id/transactions', (req, res) => {
 app.listen(port, () => {
   console.log(`Rewards and loyalty platform backend running on port ${port}`);
 });
+
 module.exports = app;
