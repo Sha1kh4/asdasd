@@ -4,8 +4,9 @@ const sqlite3 = require('sqlite3').verbose();
 const fetch = require('node-fetch');
 
 const app = express();
-const port = 3000;
-
+const port = 4000;
+crossOrigin = require('cors');
+app.use(crossOrigin());
 // Middleware
 app.use(bodyParser.json());
 
