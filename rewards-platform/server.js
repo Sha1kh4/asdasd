@@ -167,7 +167,8 @@ let diamSdk;
       try {
         const tx = await diamante.transfer(row.secret_key, row.wallet_address, amount);
         db.run('INSERT INTO transactions (user_id, type, amount, tx_hash) VALUES (?, ?, ?, ?)', [id, 'issue', amount, tx.hash]);
-        res.json({ message: 'Tokens issued successfully', tx_hash: tx.hash });
+        balance = await diamante.getBalance(row.secret_key);
+        res.json({ message: 'Tokens issued successfully', tx_hash: tx.hash,balance:balance });
       } catch (error) {
         res.status(500).json({ error: error.message });
       }
